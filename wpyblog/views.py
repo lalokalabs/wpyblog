@@ -16,7 +16,6 @@ ONE_WEEK = ONE_DAY * 7
 
 @cache_page(ONE_DAY)
 def list_post(request):
-    print("CCCCCCCCCCXXXX")
     return get_post_list(request)
 
 @cache_page(ONE_DAY)
@@ -50,23 +49,28 @@ def get_single_post(request, post_id):
     context["author_name"] = author_name
     context["post_categories"] = post_categories
     context["post_tags"] = post_tags
-    context["categories"] = get_categories(request.LANGUAGE_CODE)
+    context["categories"] = get_categories(lang=request.LANGUAGE_CODE)
 
     response = TemplateResponse(request, "wpyblog/view_post.html", context)
 
     return response
 
-def get_post_list(request, category_id = None, tag_id = None):
+def get_post_list(request, category_id = None, tag_id = None, exclude_category_id = None):
     context = {}
 
     page_number = request.GET.get('page', 1)
 
-    posts_data = get_posts_data(page_number, category_id, tag_id)
+    posts_data = get_posts_data(
+        page_number=page_number,
+        category_id=category_id,
+        tag_id=tag_id,
+        exclude_category_id=exclude_category_id,
+    )
 
     pagination = get_pagination_data(page_number, posts_data["total_pages"], posts_data["count"])
 
     context["posts"] = posts_data["posts"]
-    context["categories"] = get_categories(request.LANGUAGE_CODE)
+    context["categories"] = get_categories(lang=request.LANGUAGE_CODE, exclude_category_id=exclude_category_id)
     context["pagination"] = pagination
 
     response = TemplateResponse(request, "wpyblog/post_list.html", context)
@@ -84,7 +88,7 @@ def _process_post(post):
         post["polylang_translations"][count]["slug"] = uri_to_iri(post["polylang_translations"][count]["slug"])
     return post
 
-def get_posts_data(page_number, category_id = None, tag_id = None):
+def get_posts_data(page_number, category_id = None, tag_id = None, exclude_category_id=None):
     
     posts_data = {}
     
@@ -92,16 +96,19 @@ def get_posts_data(page_number, category_id = None, tag_id = None):
 
     url = settings.BLOG_URL + "/wp-json/wp/v2/posts"
 
-    if category_id is not None:
-        url = url + "?categories=" + str(category_id)
-
-    if tag_id is not None:
-        url = url + "?tags=" + str(tag_id)    
-
     query_params = {
         'page': page_number,
         'per_page': 9
     }
+
+    if category_id is not None:
+        query_params["categories"] = str(category_id)
+
+    if exclude_category_id is not None:
+        query_params["categories_exclude"] = str(exclude_category_id)
+    
+    if tag_id is not None:
+        query_params["tags"] = str(tag_id)        
 
     response = requests.get(url, query_params, timeout=3, auth=get_blog_access())
     
@@ -171,12 +178,17 @@ def get_post(post_id):
 
     return post
 
-def get_categories(lang="en"):
+def get_categories(lang="en", exclude_category_id=None):
     categories = []
 
     url = settings.BLOG_URL + "/wp-json/wp/v2/categories?hide_empty=1&lang=" + lang
 
-    response = requests.get(url)
+    query_params = {}
+
+    if exclude_category_id is not None:
+        query_params["exclude"] = str(exclude_category_id)
+
+    response = requests.get(url, query_params)
     categories = response.json()
 
     def _process_category(category):
